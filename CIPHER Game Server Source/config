@@ -1,0 +1,19 @@
+# comments start with a #-sign
+#
+# ATTENTION:
+# the values of scriptdelay and threadsperminute are quite aggressive and probably
+# only usable for the 'testgame' in the test.db.sql
+#
+# Database
+dbhost 127.0.0.1
+dbname ctf
+dbuser ctf
+dbpass zmlf5GGmpeXp
+
+# the following line is needed for drone.pl and submitserver.pl
+game 1
+
+# you can give drone.pl a set of services to work on
+# if not set, drone.pl will work on all services in the given game
+#services 5,6,7,8,9,10,12
+#services 5,6

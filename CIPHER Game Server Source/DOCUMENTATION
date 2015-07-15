@@ -1,0 +1,534 @@
+# ********************************************************************
+#
+#  This document is free; you can redistribute it and/or modify it 
+#  under the terms of the GNU General Public License as published by the Free 
+#  Software Foundation; either version 2 of the License, or (at your option) 
+#  any later version.
+#  
+#  This document is distributed in the hope that it will be useful, but WITHOUT 
+#  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or 
+#  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for 
+#  more details.
+#  
+#  You should have received a copy of the GNU General Public License along with
+#  this program; if not, write to the Free Software Foundation, Inc., 59 
+#  Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#  
+#  The full GNU General Public License is included in this distribution in the
+#  file called LICENSE.
+#  
+#  Contact Information:
+#     Lexi Pimenidis, <lexi@i4.informatik.rwth-aachen.de>
+#     RWTH Aachen, Informatik IV, Ahornstr. 55 - 52056 Aachen - Germany
+#*******************************************************************************
+# 
+# CREATED AND DESIGNED BY 
+#    Lexi Pimenidis, lexi@i4.informatik.rwth-aachen.de
+#
+
+Documentation for the Gameserver
+--------------------------------
+
+Content:
+
+0) Preface
+1) Introduction
+2) Installation
+3) Database Layout
+4) Administration
+5) Working with the Gameserver (Gamemaster)
+6) Playing with the Gameserver (Players)
+7) Things to do and fix in future versions
+
+---------------------------------------------------------------------------
+0) Preface
+
+As with most programmers, I also feel that writing documentation is often an
+unnecessary burden. You should thus not expect this documentation to be
+up-to-date with the source. Although I try to bring it to the level of the
+source code from time to time, it often lacks behind. So, if in doubt: read the
+source ;)
+
+---------------------------------------------------------------------------
+1) Introduction
+
+This gameserver was originally written to support the CIPHER contest of the RWTH
+Aachen on July 22nd 2005. The gameserver was entirely designed and written by
+Lexi Pimenidis <lexi@i4.informatik.rwth-aachen.de>.
+
+It's main task is to periodically check whether a number of internet services
+are working for each team participating in a capture-the-flag-style contest.
+The gameserver can this task so for a number of parallel games, services and
+teams.
+
+A capture-the-flag exercise, short: CTF, consists of multiple teams, each
+hosting a server that has multiple services running, like e.g. a webserver, a
+mail server, or customized services.  The services contain typical security
+vulnerabilities that allow to compromise the server to a certain extend.
+
+The goal of these challenges is to maintain the services up, functional and
+uncompromised for the duration of the game. Additional scores can usualy be
+gained by patching the vulnerabilities of the services and exploiting the
+knowledge of the found weaknesses at the other team's servers.
+
+The main task of the gameserver is to periodically check whether the services
+are working and functional. This gameserver is designed to do this task for a
+number of parallel games, services and teams.
+
+The gameserver is designed to be as stateless as possible. If the process is
+killed or terminated it can simply be restarted without major problems. The
+complete process and status of the game is stored in the mysql database. Thus,
+killing the gameserver does at maximum stops all transactions that are
+currently done. But besides the actions that were active when the gameserver
+was killed, everything else should continue working as if it were never
+restarted.
+
+ON THE QUALITY OF THE CODE:
+
+Please spare us from evil comments on the quality of the code. We tried our
+best to create something that works and is as secure as possible. The code also
+evolved from time to time. So there might be a lot of older fragments in the code that are
+deprecated or not used at all. Sure, if it would be rewritten from scratch, the
+code would be cleaner and easier to understand. If you want to do it: go ahead.
+
+Anyway: the code works, is quite secure and stable. This is more than most
+other tools can do :-)
+
+---------------------------------------------------------------------------
+2) Installation
+
+You need at least the following software to run the gameserver:
+- perl to execute the gameserver drones.
+- a mysql database server to keep the states
+- an HTTP-Server (PHP-enabled) to display the scoreboard and accept and
+  review the advisories
+
+To get an estimation of the hardware requirements: we ran the gameserver on 
+this hardware/configuration during CIPHER:
+- 2.6 GHz Celeron
+- 1GB RAM
+- SATA RAID-1 with LVM
+- Gentoo
+and could serve 14 teams with each 5 services and 150sec flag interval without
+major problems.
+
+At Cipher4 we used three machines with each about 2-3 Ghz CPU and 1-2 GB RAM.
+With the services distributed evenly on these three machines we were able to
+serve 32 teams without any problems.
+
+1.1) Files of the Backend
+
+The gameserver consists of several programs to fulfill this task:
+- drone.pl         this is the main program so check services and distribute flags.
+                   The gameserver only expected one commandline parameter: a configuration file.
+- submitserver.pl  is a daemon that accepts flags as input, doing all sanity checks and scoring
+- monitor.pl       is a complementary (optional) program that monitors on load,
+                   zombie-processes, and drones
+- control.pl       a command line tool to list, start and stop drones
+
+For stability and saftey there are some wrapper scripts:
+- submitserver_loop.pl  this scripts start the services and restarts it if neccessary
+
+And there are some auxiliary files:
+- common.pm       module for keeping easy access to configuration data and common public constants
+- mysql.pm        a module that allows mysql-access 
+- ctf.v2.sql      contains the structure of the neccessary mysql database
+- config          an example configuration file
+
+For developers there are
+- clean_db.sh     removes all data from the db that is generated during a (test-) game
+
+1.2) Files of the Web Frontend
+
+The files of the frontend are:
+
+ htdocs/index.html           The main page that links all sub-pages
+ htdocs/style.css            The style of the frontend
+ htdocs/config.inc.php       Holds the configuraiton variables
+
+ htdocs/admin.php            The main page for game masters during the contest
+
+ htdocs/announcements.php    To enter conveniently new announcements
+ htdocs/advisor*.php         Enter, display, and review advisories
+
+1.3) Example Scripts for Testing Services 
+
+In the directory 'testservices/' there are some scripts without real functionality, but they
+can be taken as templates for own scripts.
+- false.sh       always returns as if the client wouldn't work
+- true.sh        always returns as if the client would work
+- random.sh      returns with random (but valid) values
+- test.sh        needs a lot of time and is used to test whether timeouts are handled correctly
+
+- mail.pl        is a real-life example of the service "mail" from the CIPHER contest
+- sfind.sh       is a real-life example from the RWTH Aachen Hacking Lab (note that some things
+                 are different there, as the gameserver has root-access with a public-key on
+                 all team's machines)
+
+1.4) The Configuration file
+
+To use your own configuration (yes, you want to do that!) edit the file
+'config'
+
+We provide an example configuration file with this package.
+
+The parameters in the config file are as follows:
+  - dbhost       \
+  - dbname        \ are used to access the database
+  - dbuser        /
+  - dbpass       /
+
+Using database access, there are much more configuration variables in the
+database. As they are documented there, I spare myself from describing their 
+functionality in this document.
+
+Just one word about the value of 'game' in the table 'configuration':
+if the value is set to 'NULL' it is taken as default value for all games, where
+there is no specific value given in a dedicated record in this table. so you can
+have multiple parallel games running with either the default values or edited
+values at the same time.
+
+Another confugration file in 'htdocs/config.inc.php'. Besides the database
+configuration it keeps these variables:
+- debug: set this to zero, once players start accessing the webfrontend!
+- GAMEID: set this to the gameid of a running game (sorry, haven't had the
+  time to write an interface for multiple games - just copy the files 
+  in one directory for each game, if you need to)
+- textbox: is the size of textboxes
+- displayfreshscores: is the number of seconds, where flags submitted within
+  this amount of recent time are marked specially (just visual gimmick)
+- include_advisories_to_extra_score: ??
+- delay_advisory_publishment: advisories are publicly accessable after
+  X minutes per score their are assigned to.
+- password_hash: the md5-hash of the password that gies the gamemaster 
+  access to all the administrative pages of the site
+
+---------------------------------------------------------------------------
+
+2) Installation Process
+
+Installation simply consists of these steps:
+- extract the scripts of the tar-ball to a directory of your choice
+- install the empty database shipped with this package in your mysql server
+  and fix access permissions
+- edit the example config file to suit your database parameters
+- copy the htdocs-files to a suitable directory of your web server
+- edit the config.inc.php
+
+---------------------------------------------------------------------------
+3) Database Layout 
+
+please refer to inline documentation in ctf.v2.sql
+
+---------------------------------------------------------------------------
+4) Administration
+
+The gameserver is developed to be robust, stateless and can be run on
+distributed machines.
+
+It is recommended to start several drones and one monitor-process per machine. While the
+drones can even run on different machines, as long as they have access to the
+neccessary gameserver scripts, the monitor will not be able to kill zombies on
+remote machines, of course.
+
+You also need to start one submitserver process, possibly with the help of
+the submitserver_loop.sh
+
+It is currently ESSENTIAL for operation to have the same time and timezone on
+all participating machines running either the database, or the drones.
+
+Once the drones are running there is no more need to do anything. Except
+watching for bugs and irregularities in the gameserver scripts and review
+advisories.
+
+The architecture is designed to keep all information in the database, thus 
+all processes can be killed and restarted at any time without major loss of information.
+
+I recommend that each attempt to set a flag and retrieve a flag is allowed
+around 1 second of real time. Thus, if there are 12 teams and 6 services, you
+should not put the flag_interval below 12*6=72 seconds. If possible, allow
+2 seconds, to have some ressources left for other stuff.
+
+The relative load distribution is roughly this (measured on CIPHER2):
+  mysql ca 10%
+  gameserver ca 10%
+  submitserver ca 30%
+  scoreboard ca 50%
+Experiences from Cipher 4 show a slightly more different picture:
+  mysql about 20%
+  drones about 50%
+  submitserver about 15%
+  scoreboard/web server about 15%
+
+Thus - it is recommended to have enough ressources at hand. If possible use
+three physical machines: one for the database, one for the web interface
+and one for the submitserver. Then start drones on each of the boxes and 
+try to balance the number of drones according to the load on the machines.
+
+4.1) Scoring system
+
+See http://www.cipher-ctf.org/CaptureTheFlag.php -> Scoring details
+
+A copy:
+
+# The scores for defense are given according to these rules:
+
+    * Each service of each team will get checked once per interval. An interval will be (most probably) between 60 seconds and 5 minutes.
+    * If a service can be contacted and seems to works, the team receives possibly some defensive points for the uptime.
+    * If the service works correctly, i.e. if the service delivers the data and the flag that the gameserver asked for, the team receives defensive points for having a "running" service.
+    * The gameserver will, in addition to just leave and retrieve the flag, check separate functionality of the services, which might not be important for setting or reading the flag per-se. If this functionality is not there, the gameserver might consider tha players intentionally pruned the code in order to have a smaller attack vector.
+      This is considered a foul. Within the next 5 to 10 minutes the team will not receive any more scores for this service. Then, the services is checked again, if the functionality is back.
+      Note that in case fo repeated and heavy fouls, a team is destined to loose ethical scores, too.
+    * The gameserver will provide a limited error analysis, if the service is not up:
+          o Wrong Flag: the service returned the wrong or no flag, but otherwise everything was OK
+          o Output garbled: the output was so garbled, the gameserver could not even recognize where the flag could have been
+          o Network: there were problems on the network layer, the remote host was unreable, the network was down, or whatever
+          o Timeout: everything just took to long to respond (note that we sometimes cannot distinguish between actual network and timeout errors...)
+          o Foul: see above
+          o Generic Error: everything else or unknown 
+    * If a valid flag is submitted by another team, all defensive points awarded for this flag are immediatly cancelled.
+    * The score board will only display the relative amount of points to the leading party, instead of the absolute scores. 
+
+# The scores for offensive attacks are given according to these rules:
+
+    * All flags are valid for submition for a limited period only. After this period, submitting a flag will result in no effect.
+    * A team can only submit flags from a service, if their own service of this type is considered "up" by the gameserver.
+    * Each time, a team submits a flag, it receives a number of points according to the difficulty of hacking the resp. service.
+    * The score board will only display the relative amount of points to the leading party, instead of the absolute scores. 
+
+# In addition to defensive and offensive scores, the game features ethical scores.
+
+    * Each team has 10 ethical scores at the start of the game.
+    * For violations of the rules, teams may loose ethical scores. Regardsless of possible gains in ethical scores, teams are exlcuded from the game, if they lost 10 or more ethical scores bue to rule violations.
+    * Teams can gain ethical scores for publishing advisories.
+    * Each advisory is scored 0 to 5 ethical scores, depending on the quality of the text and the level of difficulty of the described bug. We assign scores for each disclosed vulnerablity only once, in a first come, first served fashion.
+    * An advisory will only get scored, if it contains at least a short description of the bug, an exploit and a patch to remove the bug.
+    * If an advisory scores X points, it will be disclosed to all other players after X * 30 minutes of time. 
+
+# The total score is calculated as follows: for each of the categories defensive, offensive, and ethical scores a team is assigned a value of relative scores to the team with the most scores in each respective category. These three relative scores are then added and normalized, such that the leading team has 100%.
+# Note that there are some actions that are allowed but not awarded with scores. These include: breaking into a team's router, breaking into other player's computers, and submitting own flags. 
+
+---------------------------------------------------------------------------
+5) Working with the Gameserver
+
+This section covers the steps you have to do in order to setup and create your
+own game.
+
+5.1) Create the services
+
+Create a number of customized services. These services SHOULD contains errors
+in different levels of difficulty and MUST be able to be remotely accessible.
+
+The services MUST accept some kind of requests that leave back "flags" that
+are associated with some "ID". They also MUST accept requests which send them
+an ID; as a response they should produce the associated flag, if they know it.
+
+5.2) Setup the gameserver and the database
+
+To setup a game the following steps are needed to be done:
+- add record to table `game`
+- add records to table `team`
+- add records to table `service`
+- add records in table `game_x_team`
+- add records in table `game_x_service`
+
+
+5.3) Write scripts to test the service's functionality
+
+Create scripts that check the functionality of a service. These scripts must be
+executable by the user-id that the gameserver is running with. Some example
+scripts are provided in the directory "testservices".
+
+Take care that your scripts are not vulnerable by the teams! Don't parse
+a service's response in a vulnerable way! This is the only point where our
+knowledge can't protect you and your server.
+
+The scripts are then called from the gameserver with the following parameters:
+Where <parameters> refers to the following list of parameters:
+  - "$ACTION", where $ACTION is either "store" or "retrieve".
+               If any other string is given, the gameserver script must return 
+               with error code 1 (general error).
+  - "$IP" is the IP of the service to be polled, or where the flag is to be 
+          pushed to. This might also be a hostname, although IPs are recommended.
+  - "$ID" is the ID of the flag (not the numerical one from the database, but
+          rather some hex-string like stuff)
+  - "$FLAG" is the actual flag - i.e. usually a long hexstring
+  (the following parameters are optional and can be set under some
+  circumstances, however the script must not rely on being provided with these)
+  - "TEAM-ID" the numerical ID of the team, whose IP is given in parameter 2.
+              this ID can be used by the gameserver script to make additional
+              queries to the central DB
+  - "FLAG-DB-ID" is the numerical id of the flag in the central database. 
+              this ID can be used by the gameserver script to make additional
+              queries to the central DB
+
+The gameserver gives the script a fixed amount of seconds time to do their work.
+(see config-file parameter "scriptdelay"). The scripts receive no other input than 
+the four parameters. The gameserver will only react upon the exit-status of the 
+script. It will only do so, in case it terminated in time. All output from stdout and
+stderr is read and stored in the database to ease debugging.
+
+These are possible return values:
+ 0: everything went fine - flag was delivered/successfully read
+ 1: some generic error appeared, possibly the parameters of the script were
+    wrong, or something VERY strange happened by accessing the team's service
+ 5: the service returned the wrong or no flag, but otherwise everything was OK
+ 9: the output was so garbled, the script could not even recognize where the
+    flag could have beenin this output
+13: there were problems on the network layer, the remote host was unreable,
+    the network was down, or whatever
+17: timeout: eveyrthing just took to long to respond
+21: foul! is set by a script, if a service seems to do irregular things
+    service is then not scored defensive scores for $config{foul_timout}
+    seconds
+
+If a script is called with less than four parameters it MUST exit 
+with a return code of 1.
+
+The first parameter is the action that the script shall do, whether it should
+store a flag or check the exitence of a flag. If the first parameter is neither 
+'store' nor 'retrieve', the script MUST exit with a return value of 1.
+
+The second parameter is the IP of the remote host that is to be checked. If the
+script can't understand the IP or the hostname, it MUST exit with a return value 
+of 1.
+
+The third parameter is the flag's identifier. Every flag is accompanied by an
+identifier. To avoid that a service receives a query with the data that is also
+expected in the output, each flag has a key/identifier. Saving a flag should
+be in the way such that the key (and only this key) can be used to read the
+flag from the service (unless you hack the service, of course). So the script
+must take care that is crafts the query to store the flag in such a way that
+it's hidden unelss somebody knows the ID. If checking a service for functionality,
+a query is send that contains the flag's ID as key, such the remote service 
+should be able to answer with somethign that contains the flag.
+
+The fourth parameter is the string of the flag that has to be delivered or
+retrieved.
+
+It should not be assumed by scripts, that the flag and it's identifier are
+pure hex strings. Yet, it is reasonable to assume in most cases that neither
+contains quotes, backticks, or the like.
+
+5.4) Test setup
+
+Create an VMWare Image and install the vulnerable services.
+
+Create a dummy game in the database with the vulnerable image as the only team
+being present and add the services to the database.
+
+The start the game and check if everything works as expected. We recommend that
+a 'clean' image, i.e. the image as being delivered to the players, should start
+up all services by default and should work fine for a longer timeframe if not
+attacked.
+
+---------------------------------------------------------------------------
+6) Playing with the Gameserver (Players)
+
+6.1) Submitting flags
+
+Players shall submit their flags by connecting to the submitserver with telnet,
+netcat, or proprietary software using simple TCP-sockets.
+
+Once a team has captured flags from another team, it should submit the flags as
+soon as possible to a central submit server. This is because flags are valid
+for scoring only for a limited amount of time.
+
+CIPHER CTFs use a dedicated piece of software with a simple human readable
+protocol for submitting flags. Each team is assigned a number to identify
+itself to the submit server. Using this number, a team connects with telnet,
+netcat or similar methods to a host/TCP-port announced prior to the start of
+the game. The submit server welcomes the team with a banner and expects the
+numerical ID of the submitting team. Then the team can submit the flags, one
+per line and terminate the connection with the string quit.
+
+This is an example session, how such a connection would look like:
+(it also shows two examples of typical flags)
+
+    < Please identify your team with its numerical team-number
+    > 2
+    < Welcome 'team 2'. Enter one flag per line, or QUIT when finished
+    > 12533a26f625cd7f903eab8e100c4988
+    < Congratulations, you captured a flag!
+    > ac9172a11ebde0c64b6661d7fb74162a
+    < Congratulations, you captured a flag!
+    > 12533a26f625cd7f903eab8e100c4988
+    < Sorry, you already submitted this flag
+    > quit
+
+A full list of answers to submitted flags and their descriptive meaning:
+
+  Sorry, don't recognize your team   
+  The server doesn't recognize your numerical team-ID. Please check back to the game master.
+
+  Sorry, is this a flag?   
+  The string submitted as a flag does not match the regular expression for valid flags. Check length of string.
+
+  Sorry, timeout   
+  You're too slow with your input. Usually you have 5 seconds per line to send input to the server.
+
+  Sorry, game not started   
+  You shouldn't have any flags at that point in time anyway.
+
+  Sorry, game over   
+  Game is over. You can't submit any more flags.
+
+  Sorry, flag not in database   
+  Although the input looks like a flag, the gameserver did not use this value as a flag for some team.
+
+  Sorry, flag is your own   
+  This is one of the flags submitted to your own team's server (you should definitely start thinking, if you got this one from another team's server)
+
+  Sorry, flag expired   
+  This flag is too old. No scores for this one, sorry!
+
+  Sorry, internal error #1   
+  Should never happen ;-)
+
+  Sorry, your team does not have the corresponding service up
+  Your team must have the corresponding service up in order to submit flags of other teams for it
+
+  Sorry, you already submitted this flag   
+  You or someone else with your team id already submitted this flag.
+
+  Congratulations, you captured a flag!   
+  :-)
+
+Additional remarks: Players can help save ressources by
+
+    * pooling/batching flag submissions.
+    * avoid submitting flags that are too old
+    * avoid submitting flags twice
+    * avoid submitting garbage/random data or flags within their context 
+
+---------------------------------------------------------------------------
+7) Things to do and fix in future versions
+
+7.1) ensure functionality
+
+Things that should work, but not are not checked very carefully, or are minor:
+
+- each part of the gameserver must be secure, i.e. not rely upon other parts to
+  check and/or sanitize input. This includes input read from the database.
+
+- each part of the gameserver must be safe, i.e. not rely upon other threads/
+  information.
+
+- find typos and correct grammar in documentation and comments in the source.
+
+- make nicer frontends
+
+7.2) fix
+
+Things that are either broken or not implemented:
+
+- each sql-query send to the database thread should contain a descriptive
+  string which program part it originates from. Thus allowing easier debugging
+  in case of problems.
+
+- create a nice frontend for an administrator to enter data into the 
+  gameserver, check events, change data and stuff
+
+- read all output from language files for internationalization
+
+# vim: textwidth=79 tabstop=2 et
